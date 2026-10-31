@@ -19,8 +19,16 @@ package raft
 
 import (
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"lab2raft/labrpc"
+)
+
+const (
+	Follower = iota
+	Candidate
+	Leader
 )
 
 // as each Raft peer becomes aware that successive log entries are
@@ -47,7 +55,20 @@ type Raft struct {
 	// Your data here (3A, 3B).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	applyCh   chan ApplyMsg
+	applyCond *sync.Cond
+	dead      int32
 
+	state       int
+	currentTerm int
+	votedFor    int
+	log         []LogEntry
+	lastHeard   time.Time
+
+	commitIndex int
+	lastApplied int
+	nextIndex   []int
+	matchIndex  []int
 }
 
 // return currentTerm and whether this server
@@ -64,12 +85,18 @@ func (rf *Raft) GetState() (int, bool) {
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
+	Term         int
+	CandidateId  int
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 type RequestVoteReply struct {
 	// Your data here (3A).
+	Term        int
+	VoteGranted bool
 }
 
 // example RequestVote RPC handler.
@@ -79,10 +106,20 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 type AppendEntriesArgs struct {
 	// Your data here (3A, 3B).
+	Term         int
+	LeaderId     int
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []LogEntry
+	LeaderCommit int
 }
 
 type AppendEntriesReply struct {
 	// Your data here (3A, 3B).
+	Term          int
+	Success       bool
+	ConflictTerm  int
+	ConflictIndex int
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -153,7 +190,31 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // turn off debug output from this instance.
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+	atomic.StoreInt32(&rf.dead, 1)
+	rf.applyCond.Broadcast()
 }
+
+func (rf *Raft) killed() bool { return atomic.LoadInt32(&rf.dead) == 1 }
+
+// ---- shared helpers ----
+// Functions ending in "Locked" assume the caller already holds rf.mu.
+
+func (rf *Raft) lastLogIndexTerm() (int, int) {
+	i := len(rf.log) - 1
+	return i, rf.log[i].Term
+}
+
+func (rf *Raft) becomeFollowerLocked(term int) {
+	if term > rf.currentTerm {
+		rf.currentTerm = term
+		rf.votedFor = -1
+	}
+	rf.state = Follower
+}
+
+func (rf *Raft) resetElectionTimerLocked() { rf.lastHeard = time.Now() }
+
+func (rf *Raft) signalApplyLocked() { rf.applyCond.Broadcast() }
 
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -168,6 +229,14 @@ func Make(peers []*labrpc.ClientEnd, me int, applyCh chan ApplyMsg) *Raft {
 	rf.me = me
 
 	// Your initialization code here (3A, 3B).
+	rf.applyCh = applyCh
+	rf.applyCond = sync.NewCond(&rf.mu)
+	rf.state = Follower
+	rf.votedFor = -1
+	rf.log = []LogEntry{{Term: 0}}
+	rf.lastHeard = time.Now()
+	// go rf.ticker()   <- Student 1 uncomments later
+	// go rf.applier()  <- Student 3 uncomments later
 
 	return rf
 }
