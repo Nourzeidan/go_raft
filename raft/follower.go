@@ -11,7 +11,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// reject a leader if it has a smaller term
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
-		return;
+		return
 	}
 
 	// if we continue then this is a valid leader
@@ -19,17 +19,22 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.resetElectionTimerLocked()
 	reply.Term = rf.currentTerm
 
-	lastIndex, - = rf.lastLogIndexTerm()
+	lastIndex, _ := rf.lastLogIndexTerm()
 	if args.PrevLogIndex > lastIndex {
 		reply.ConflictIndex = lastIndex + 1
 		DPrintf("[%d] AE reject: log is too short (prev=%d last=%d)",
-		 rf.me, args.PrevLogIndex, lastIndex)
+			rf.me, args.PrevLogIndex, lastIndex)
 		return
 	}
 
 	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
-		reply.ConflictIndex = args.PrevLogIndex
+		conflictTerm := rf.log[args.PrevLogIndex].Term
+		i := args.PrevLogIndex
+		for i > 1 && rf.log[i-1].Term == conflictTerm {
+			i--
+		}
+		reply.ConflictTerm = conflictTerm
+		reply.ConflictIndex = i
 		DPrintf("[%d] AE reject: term mismatch (prev=%d term=%d)", rf.me, args.PrevLogIndex, args.PrevLogTerm)
 		return
 	}
@@ -48,9 +53,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	// commit entries
-	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, lastIndex)
-		rf.applyCond.Broadcast()
+	newCommit := min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
+	if newCommit > rf.commitIndex {
+		rf.commitIndex = newCommit
+		rf.signalApplyLocked()
 	}
 
 	reply.Success = true
