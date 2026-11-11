@@ -77,3 +77,22 @@ func TestLeaderBecomeLeader(t *testing.T) {
 		t.Fatalf("leader stopped being leader during heartbeats")
 	}
 }
+
+// Full chain with a fake leader: Start -> replicate -> commit -> apply.
+// cfg.one only succeeds if all 3 servers apply the command on applyCh.
+func TestLeaderOneFake(t *testing.T) {
+	cfg := make_config(t, 3, false)
+	defer cfg.cleanup()
+
+	leader := cfg.rafts[0]
+	leader.mu.Lock()
+	leader.onBecomeLeaderLocked()
+	leader.mu.Unlock()
+
+	for want := 1; want <= 3; want++ {
+		index := cfg.one(want*100, 3)
+		if index != want {
+			t.Fatalf("got index %v, expected %v", index, want)
+		}
+	}
+}

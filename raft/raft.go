@@ -243,7 +243,7 @@ func Make(peers []*labrpc.ClientEnd, me int, applyCh chan ApplyMsg) *Raft {
 	rf.log = []LogEntry{{Term: 0}}
 	rf.lastHeard = time.Now()
 	// go rf.ticker()   <- Student 1 uncomments later
-	// go rf.applier()  <- Student 3 uncomments later
+	go rf.applier()
 
 	return rf
 }
