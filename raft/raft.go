@@ -78,6 +78,10 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (3A).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	term = rf.currentTerm
+	isleader = rf.state == Leader
 	return term, isleader
 }
 
@@ -102,6 +106,7 @@ type RequestVoteReply struct {
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
+	rf.handleRequestVote(args, reply)
 }
 
 type AppendEntriesArgs struct {
@@ -242,7 +247,7 @@ func Make(peers []*labrpc.ClientEnd, me int, applyCh chan ApplyMsg) *Raft {
 	rf.votedFor = -1
 	rf.log = []LogEntry{{Term: 0}}
 	rf.lastHeard = time.Now()
-	// go rf.ticker()   <- Student 1 uncomments later
+	go rf.ticker()
 	go rf.applier()
 
 	return rf
